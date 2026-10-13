@@ -164,9 +164,10 @@ export const supabaseBackend: Backend = {
   },
 
   async reorderHabits(_user, ordered) {
-    await Promise.all(
+    const results = await Promise.all(
       ordered.map(({ id, position }) => db().from('habits').update({ position }).eq('id', id)),
     )
+    for (const { error } of results) fail('Could not reorder the habits', error)
   },
 
   async createArea(user, name, position) {
@@ -185,19 +186,14 @@ export const supabaseBackend: Backend = {
   },
 
   async setEntry(user, habitId, date, patch) {
-    const { error } = await db()
-      .from('entries')
-      .upsert(
-        {
-          user_id: user.id,
-          habit_id: habitId,
-          date,
-          value: patch.value ?? 0,
-          skipped: patch.skipped ?? false,
-          note: patch.note ?? '',
-        },
-        { onConflict: 'habit_id,date' },
-      )
+    // Send only the fields in the patch. On conflict the upsert then updates
+    // just those columns, so a note keeps the day's value and a tick keeps the
+    // note; a new row takes the schema's defaults for the rest.
+    const row: Record<string, unknown> = { user_id: user.id, habit_id: habitId, date }
+    if (patch.value !== undefined) row.value = patch.value
+    if (patch.skipped !== undefined) row.skipped = patch.skipped
+    if (patch.note !== undefined) row.note = patch.note
+    const { error } = await db().from('entries').upsert(row, { onConflict: 'habit_id,date' })
     fail('Could not save the check-in', error)
   },
 }
