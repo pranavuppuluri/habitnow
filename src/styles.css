@@ -208,6 +208,16 @@ button {
   color: var(--ink);
 }
 
+/* Import is a <label> around a hidden file input, so it needs the button look. */
+label.nav-item {
+  cursor: pointer;
+}
+
+label.nav-item:focus-within {
+  outline: 2px solid var(--ink-3);
+  outline-offset: -2px;
+}
+
 .nav-item[aria-current="true"] {
   background: var(--surface-3);
   color: var(--ink);

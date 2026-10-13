@@ -3,6 +3,7 @@ import { backend } from './backend'
 import { currentBucket, friendlyDate, todayKey } from './lib/date'
 import { storageKey } from './lib/storage'
 import { fetchContributions, planGithubSync, type Contributions } from './lib/github'
+import { backupFilename, describeData, parseBackup, toBackup } from './lib/backup'
 import { dayProgress, getEntry, habitsOn, valueOn } from './lib/stats'
 import {
   EMPTY_DATA,
@@ -22,7 +23,7 @@ import { HabitDetail } from './components/HabitDetail'
 import { HabitForm } from './components/HabitForm'
 import { HabitRow } from './components/HabitRow'
 import { Progress } from './components/Progress'
-import { Archive, Bell, Chart, Exit, Folder, Logo, Moon, Plus, Sun, Today } from './components/icons'
+import { Archive, Bell, Chart, Download, Exit, Folder, Logo, Moon, Plus, Sun, Today, Upload } from './components/icons'
 
 type View = 'today' | 'progress' | 'archive'
 type Theme = 'light' | 'dark'
@@ -329,6 +330,34 @@ export default function App() {
     }
   }
 
+  function exportData() {
+    const blob = new Blob([JSON.stringify(toBackup(data), null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = backupFilename(todayKey())
+    link.click()
+    URL.revokeObjectURL(url)
+    setToast({ message: `Backup saved: ${describeData(data)}.` })
+  }
+
+  async function importData(file: File) {
+    const replace = backend.replaceData
+    if (!replace) return
+    let restored: AppData
+    try {
+      restored = parseBackup(await file.text())
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : 'That backup could not be read.' })
+      return
+    }
+    const now = describeData(data)
+    if (!confirm(`Replace ${now} on this device with ${describeData(restored)} from ${file.name}?`)) return
+    await mutate((u) => replace(u, restored))
+    setDetailId(null)
+    setToast({ message: `Restored ${describeData(restored)}.` })
+  }
+
   async function deleteHabit(habit: Habit) {
     if (!confirm(`Delete "${habit.name}" and all of its check-ins? This cannot be undone.`)) return
     setDetailId(null)
@@ -423,6 +452,24 @@ export default function App() {
               <button className="nav-item" onClick={enableReminders} disabled={notify === 'denied'}>
                 <Bell /> {notify === 'denied' ? 'Reminders blocked' : 'Turn on reminders'}
               </button>
+            )}
+            <button className="nav-item" onClick={exportData} title="Save everything to a file you keep">
+              <Download /> Export data
+            </button>
+            {backend.replaceData && (
+              <label className="nav-item" title="Restore from a backup file">
+                <Upload /> Import data
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (file) void importData(file)
+                  }}
+                />
+              </label>
             )}
             <button
               className="nav-item"
