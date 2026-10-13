@@ -6,6 +6,10 @@
  *
  *   PORT=8080 HOST=0.0.0.0 DATA_DIR=./data APP_DIR=./app node habitnow-server.mjs
  *
+ * HTTPS, which phones need to install the app and allow reminders: either put
+ * Tailscale Serve in front (scripts/pi-https.sh), or point TLS_CERT and TLS_KEY
+ * at PEM files and this server speaks TLS itself.
+ *
  * Layout under DATA_DIR:
  *   users.json            accounts keyed by lowercased email (scrypt hashes)
  *   sessions.json         session token -> user id
@@ -16,6 +20,7 @@
  * same; change them together.
  */
 import { createServer } from 'node:http'
+import { createServer as createSecureServer } from 'node:https'
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -103,15 +108,28 @@ function passwordMatches(password, stored) {
 
 const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name })
 
-function startSession(res, userId) {
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+
+/**
+ * Whether the browser reached us over HTTPS: directly, or through a proxy on
+ * this machine such as Tailscale Serve. The forwarded header is only believed
+ * from loopback, so nobody on the network can claim it.
+ */
+function isSecure(req) {
+  if (req.socket.encrypted) return true
+  return LOOPBACK.has(req.socket.remoteAddress) && req.headers['x-forwarded-proto'] === 'https'
+}
+
+function sessionCookie(req, value, maxAge) {
+  return `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${isSecure(req) ? '; Secure' : ''}`
+}
+
+function startSession(req, res, userId) {
   const token = randomBytes(32).toString('hex')
   const all = sessions()
   all[token] = userId
   writeJSON(SESSIONS_FILE, all)
-  res.setHeader(
-    'Set-Cookie',
-    `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`,
-  )
+  res.setHeader('Set-Cookie', sessionCookie(req, token, SESSION_MAX_AGE))
 }
 
 function sessionToken(req) {
@@ -173,7 +191,7 @@ const routes = [
     all[key] = stored
     writeJSON(USERS_FILE, all)
     writeData(stored.id, { habits: [], areas: [], entries: {} })
-    startSession(res, stored.id)
+    startSession(req, res, stored.id)
     return { user: publicUser(stored) }
   }],
 
@@ -182,7 +200,7 @@ const routes = [
     const stored = users()[key]
     if (!stored) throw new HttpError(401, 'No account uses that email.')
     if (!passwordMatches(String(body.password ?? ''), stored)) throw new HttpError(401, 'That password does not match.')
-    startSession(res, stored.id)
+    startSession(req, res, stored.id)
     return { user: publicUser(stored) }
   }],
 
@@ -193,7 +211,7 @@ const routes = [
       delete all[token]
       writeJSON(SESSIONS_FILE, all)
     }
-    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
+    res.setHeader('Set-Cookie', sessionCookie(req, '', 0))
     return { ok: true }
   }],
 
@@ -341,7 +359,15 @@ function serveStatic(req, res, pathname) {
 
 // ----------------------------------------------------------------- server --
 
-const server = createServer(async (req, res) => {
+const TLS_CERT = process.env.TLS_CERT
+const TLS_KEY = process.env.TLS_KEY
+if (Boolean(TLS_CERT) !== Boolean(TLS_KEY)) {
+  console.error('Set both TLS_CERT and TLS_KEY to serve HTTPS, or neither.')
+  process.exit(1)
+}
+const tls = TLS_CERT ? { cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) } : null
+
+async function handle(req, res) {
   const { pathname } = new URL(req.url ?? '/', 'http://localhost')
   try {
     if (pathname.startsWith('/api/')) await handleApi(req, res, pathname)
@@ -353,11 +379,14 @@ const server = createServer(async (req, res) => {
     if (!res.headersSent) sendJSON(res, status, { error: status === 500 ? 'Server error.' : err.message })
     else res.end()
   }
-})
+}
+
+const server = tls ? createSecureServer(tls, handle) : createServer(handle)
 
 backupToday()
 server.listen(PORT, HOST, () => {
-  console.log(`HabitNow on http://${HOST}:${server.address().port}  data=${DATA_DIR}  app=${APP_DIR}`)
+  const scheme = tls ? 'https' : 'http'
+  console.log(`HabitNow on ${scheme}://${HOST}:${server.address().port}  data=${DATA_DIR}  app=${APP_DIR}`)
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

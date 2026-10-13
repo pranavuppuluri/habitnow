@@ -11,6 +11,9 @@ Environment=PORT=8080
 Environment=HOST=0.0.0.0
 Environment=DATA_DIR=/home/pranav/habitnow/data
 Environment=APP_DIR=/home/pranav/habitnow/app
+# For HTTPS without Tailscale Serve, point these at PEM files:
+# Environment=TLS_CERT=/home/pranav/habitnow/tls/cert.pem
+# Environment=TLS_KEY=/home/pranav/habitnow/tls/key.pem
 ExecStart=/usr/bin/node /home/pranav/habitnow/server/habitnow-server.mjs
 Restart=always
 RestartSec=3
