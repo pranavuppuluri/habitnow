@@ -6,6 +6,15 @@ export interface EntryPatch {
   note?: string
 }
 
+/** Push reminders, for a backend with a server that can send them. */
+export interface PushApi {
+  publicKey(): Promise<string>
+  subscribe(subscription: PushSubscriptionJSON, timeZone: string): Promise<void>
+  unsubscribe(endpoint: string): Promise<void>
+  /** Sends a test notification to every subscribed browser; how many it reached. */
+  test(): Promise<{ sent: number; devices: number }>
+}
+
 export interface Backend {
   /** 'server' for a self-hosted build, 'cloud' when Supabase keys are configured, otherwise 'device'. */
   mode: 'server' | 'cloud' | 'device'
@@ -24,6 +33,9 @@ export interface Backend {
   deleteArea(user: User, id: string): Promise<void>
 
   setEntry(user: User, habitId: string, date: string, patch: EntryPatch): Promise<void>
+
+  /** Present when reminders can be pushed with the app closed (the self-hosted server). */
+  push?: PushApi
 }
 
 export class AuthError extends Error {}

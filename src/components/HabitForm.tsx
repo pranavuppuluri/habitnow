@@ -30,6 +30,8 @@ interface HabitFormProps {
   presetIcon?: string
   onSave: (draft: HabitDraft) => Promise<void>
   onClose: () => void
+  /** Reminders are pushed by the server, so they arrive with the app closed. */
+  pushed?: boolean
 }
 
 function initial(habit: Habit | null, presetName?: string, presetIcon?: string): HabitDraft {
@@ -61,7 +63,7 @@ function initial(habit: Habit | null, presetName?: string, presetIcon?: string):
   }
 }
 
-export function HabitForm({ habit, areas, presetName, presetIcon, onSave, onClose }: HabitFormProps) {
+export function HabitForm({ habit, areas, presetName, presetIcon, onSave, onClose, pushed = false }: HabitFormProps) {
   const [draft, setDraft] = useState<HabitDraft>(() => initial(habit, presetName, presetIcon))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -298,9 +300,9 @@ export function HabitForm({ habit, areas, presetName, presetIcon, onSave, onClos
 
       {draft.reminder && (
         <p className="help" style={{ marginTop: -6 }}>
-          Reminders arrive while HabitNow is open, including in a background tab or
-          the installed app. They cannot reach you once it is fully closed — that needs
-          a server to send them.
+          {pushed
+            ? 'Your HabitNow server sends this reminder, so it arrives even when the app is closed.'
+            : 'Reminders arrive while HabitNow is open, including in a background tab or the installed app. They cannot reach you once it is fully closed; that needs a server to send them.'}
         </p>
       )}
       {areas.length === 0 && (

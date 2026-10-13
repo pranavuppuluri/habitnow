@@ -16,7 +16,7 @@ npm run build:pi
 
 echo "Uploading to $PI"
 tar -czf - -C dist-pi . | ssh "$PI" 'rm -rf ~/habitnow/app.new && mkdir -p ~/habitnow/app.new && tar -xzf - -C ~/habitnow/app.new'
-tar -czf - -C server habitnow-server.mjs habitnow.service | ssh "$PI" 'mkdir -p ~/habitnow/server ~/habitnow/data && tar -xzf - -C ~/habitnow/server'
+tar -czf - -C server habitnow-server.mjs webpush.mjs habitnow.service | ssh "$PI" 'mkdir -p ~/habitnow/server ~/habitnow/data && tar -xzf - -C ~/habitnow/server'
 
 ssh "$PI" 'set -e
   cd ~/habitnow

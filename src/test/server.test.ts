@@ -1,4 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { createDecipheriv, createECDH, createPublicKey, hkdfSync, randomBytes, verify, type ECDH } from 'node:crypto'
+import { createServer, type Server } from 'node:http'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { request } from 'node:https'
 import { tmpdir } from 'node:os'
@@ -18,7 +20,10 @@ let cookie = ''
 
 function start(): Promise<void> {
   proc = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, PORT: '0', HOST: '127.0.0.1', DATA_DIR: dataDir, APP_DIR: dataDir },
+    env: {
+      ...process.env, PORT: '0', HOST: '127.0.0.1', DATA_DIR: dataDir, APP_DIR: dataDir,
+      PUSH_TICK_MS: '150', PUSH_ALLOW_HTTP: '1',
+    },
   })
   return new Promise((resolve, reject) => {
     proc.stdout!.on('data', (chunk: Buffer) => {
@@ -136,6 +141,146 @@ describe('self-hosted server', () => {
   it('keeps a dated backup and refuses paths outside the app folder', async () => {
     expect(readdirSync(path.join(dataDir, 'backups'))).toHaveLength(1)
     expect((await fetch(`${base}/..%2f..%2fetc%2fpasswd`)).status).not.toBe(200)
+  })
+})
+
+/** A stand-in push service: records each delivery, answers 410 for /gone. */
+interface Delivery {
+  path: string
+  headers: Record<string, string | string[] | undefined>
+  body: Buffer
+}
+const deliveries: Delivery[] = []
+let pushService: Server
+let pushBase = ''
+
+/** Decrypts a push body the way a browser does (RFC 8291), to read what was sent. */
+function decrypt(body: Buffer, ua: ECDH, auth: Buffer) {
+  const salt = body.subarray(0, 16)
+  const idLength = body[20]
+  const asPublic = body.subarray(21, 21 + idLength)
+  const sealed = body.subarray(21 + idLength)
+  const info = Buffer.concat([Buffer.from('WebPush: info\0'), ua.getPublicKey(), asPublic])
+  const ikm = Buffer.from(hkdfSync('sha256', ua.computeSecret(asPublic), auth, info, 32))
+  const cek = Buffer.from(hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: aes128gcm\0'), 16))
+  const nonce = Buffer.from(hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: nonce\0'), 12))
+  const decipher = createDecipheriv('aes-128-gcm', cek, nonce)
+  decipher.setAuthTag(sealed.subarray(-16))
+  const plain = Buffer.concat([decipher.update(sealed.subarray(0, -16)), decipher.final()])
+  return JSON.parse(plain.subarray(0, plain.lastIndexOf(2)).toString())
+}
+
+/** Checks the VAPID JWT: signed by the server's key, for this push service. */
+function vapidClaims(authorization: string, serverKey: string) {
+  const [, jwt, k] = /^vapid t=([^,]+), k=(.+)$/.exec(authorization) ?? []
+  expect(k).toBe(serverKey)
+  const [header, claims, signature] = jwt.split('.')
+  const raw = Buffer.from(k, 'base64url')
+  const key = createPublicKey({
+    key: { kty: 'EC', crv: 'P-256', x: raw.subarray(1, 33).toString('base64url'), y: raw.subarray(33).toString('base64url') },
+    format: 'jwk',
+  })
+  const signed = Buffer.from(`${header}.${claims}`)
+  expect(verify('sha256', signed, { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url'))).toBe(true)
+  return JSON.parse(Buffer.from(claims, 'base64url').toString())
+}
+
+/** A browser's side of a subscription: its own key pair and auth secret. */
+function browser(route: string) {
+  const ua = createECDH('prime256v1')
+  ua.generateKeys()
+  const auth = randomBytes(16)
+  const subscription = {
+    endpoint: `${pushBase}${route}`,
+    keys: { p256dh: ua.getPublicKey().toString('base64url'), auth: auth.toString('base64url') },
+  }
+  return { ua, auth, subscription }
+}
+
+async function until(check: () => boolean, ms = 4000) {
+  const end = Date.now() + ms
+  while (!check()) {
+    if (Date.now() > end) throw new Error('timed out waiting')
+    await new Promise((r) => setTimeout(r, 50))
+  }
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+describe('reminders by Web Push', () => {
+  beforeAll(async () => {
+    pushService = createServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', (c: Buffer) => chunks.push(c))
+      req.on('end', () => {
+        deliveries.push({ path: req.url ?? '', headers: req.headers, body: Buffer.concat(chunks) })
+        res.writeHead(req.url === '/gone' ? 410 : 201).end()
+      })
+    })
+    await new Promise<void>((r) => pushService.listen(0, '127.0.0.1', r))
+    const address = pushService.address()
+    pushBase = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`
+  })
+
+  afterAll(() => new Promise<void>((r) => pushService.close(() => r())))
+
+  it('sends a test reminder only that browser can read, signed with the server key', async () => {
+    deliveries.length = 0
+    const { ua, auth, subscription } = browser('/phone')
+    const { publicKey } = (await api('GET', 'push/key')).json
+    expect(Buffer.from(publicKey, 'base64url')).toHaveLength(65)
+    const subscribed = await api('POST', 'push/subscribe', { subscription, timeZone: 'Asia/Kolkata' })
+    expect(subscribed.json).toEqual({ ok: true, timeZone: 'Asia/Kolkata' })
+
+    expect((await api('POST', 'push/test')).json).toEqual({ sent: 1, devices: 1 })
+    const [delivery] = deliveries
+    expect(delivery.path).toBe('/phone')
+    expect(delivery.headers['content-encoding']).toBe('aes128gcm')
+    expect(Number(delivery.headers.ttl)).toBeGreaterThan(0)
+    expect(vapidClaims(String(delivery.headers.authorization), publicKey).aud).toBe(pushBase)
+    expect(decrypt(delivery.body, ua, auth)).toMatchObject({ title: 'HabitNow', tag: 'habitnow-test' })
+    await api('POST', 'push/unsubscribe', { endpoint: subscription.endpoint })
+  })
+
+  it('pushes a reminder when it comes due, once, and not for a habit already done', async () => {
+    deliveries.length = 0
+    const now = new Date()
+    const reminder = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`
+    const today = now.toISOString().slice(0, 10)
+    const due = (await api('POST', 'habits', { draft: { ...draft, name: 'Stretch', icon: '🧘', reminder }, position: 0 })).json
+    const done = (await api('POST', 'habits', { draft: { ...draft, name: 'Water', reminder }, position: 1 })).json
+    await api('PUT', 'entries', { habitId: done.id, date: today, patch: { value: 1 } })
+
+    const { ua, auth, subscription } = browser('/laptop')
+    await api('POST', 'push/subscribe', { subscription, timeZone: 'UTC' })
+
+    await until(() => deliveries.length > 0)
+    await pause(700) // several more checks go by
+    expect(deliveries).toHaveLength(1)
+    expect(decrypt(deliveries[0].body, ua, auth)).toEqual({
+      title: '🧘 Stretch', body: 'Time to check this one off.', tag: `habitnow-${due.id}`, url: './',
+    })
+
+    // A restart reads the sent log and does not repeat it.
+    await stop()
+    await start()
+    await pause(500)
+    expect(deliveries).toHaveLength(1)
+
+    await api('DELETE', `habits/${due.id}`)
+    await api('DELETE', `habits/${done.id}`)
+    await api('POST', 'push/unsubscribe', { endpoint: subscription.endpoint })
+  })
+
+  it('forgets a subscription the push service says is gone, and refuses junk', async () => {
+    deliveries.length = 0
+    const { subscription } = browser('/gone')
+    await api('POST', 'push/subscribe', { subscription, timeZone: 'Not/AZone' })
+    expect((await api('POST', 'push/test')).json).toEqual({ sent: 0, devices: 1 })
+    expect((await api('POST', 'push/test')).json).toEqual({ sent: 0, devices: 0 })
+
+    expect((await api('POST', 'push/subscribe', { subscription: { endpoint: 'x' } })).status).toBe(400)
+    expect((await api('POST', 'push/subscribe', { subscription: { endpoint: `${pushBase}/a` } })).status).toBe(400)
   })
 })
 

@@ -3,6 +3,7 @@ import { backend } from './backend'
 import { currentBucket, friendlyDate, todayKey } from './lib/date'
 import { storageKey } from './lib/storage'
 import { fetchContributions, planGithubSync, type Contributions } from './lib/github'
+import { pushSupported, subscribeToPush, unsubscribeFromPush } from './lib/push'
 import { dayProgress, getEntry, habitsOn, valueOn } from './lib/stats'
 import {
   EMPTY_DATA,
@@ -64,6 +65,8 @@ export default function App() {
   // Phones only: the bottom bar has room for the main views, the rest opens from here.
   const [menuOpen, setMenuOpen] = useState(false)
   const [notify, setNotify] = useState<Permission>(() => reminderPermission())
+  // True once the server pushes this browser's reminders, so they arrive with the app closed.
+  const [pushOn, setPushOn] = useState(false)
   // Which row is being dragged, and which row it is currently hovering over.
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
@@ -82,9 +85,23 @@ export default function App() {
   // Re-armed whenever habits or check-ins change, so finishing a habit cancels
   // its reminder and editing a time takes effect immediately.
   useEffect(() => {
-    if (notify !== 'granted') return
+    // With push on, the server sends them; scheduling here too would double up.
+    if (notify !== 'granted' || pushOn) return
     return scheduleReminders(data)
-  }, [data, notify])
+  }, [data, notify, pushOn])
+
+  // Re-register on every sign-in: it keeps the server's copy of this browser's
+  // subscription and time zone current, and picks up a permission given earlier.
+  useEffect(() => {
+    if (!user || notify !== 'granted' || !pushSupported(backend.push)) return
+    let live = true
+    subscribeToPush(backend.push)
+      .then((ok) => live && setPushOn(ok))
+      .catch(() => live && setPushOn(false))
+    return () => {
+      live = false
+    }
+  }, [user, notify])
 
   const refresh = useCallback(async (u: User) => {
     try {
@@ -118,6 +135,8 @@ export default function App() {
   }
 
   async function signOut() {
+    if (pushOn && backend.push) await unsubscribeFromPush(backend.push)
+    setPushOn(false)
     await backend.signOut()
     setUser(null)
     setData(EMPTY_DATA)
@@ -322,10 +341,34 @@ export default function App() {
     const result = await askForReminders()
     setNotify(result)
     if (result === 'granted') {
+      if (pushSupported(backend.push)) {
+        try {
+          if (await subscribeToPush(backend.push)) {
+            setPushOn(true)
+            setToast({ message: 'Reminders on. They arrive even when HabitNow is closed.' })
+            return
+          }
+        } catch {
+          // Fall through to reminders while the app is open.
+        }
+      }
       const n = pendingCount(data)
       setToast({ message: n ? `Reminders on. ${n} still due today.` : 'Reminders on.' })
     } else if (result === 'denied') {
       setToast({ message: 'Your browser is blocking notifications for this site.' })
+    }
+  }
+
+  async function testReminder() {
+    try {
+      const { sent, devices } = await backend.push!.test()
+      setToast({
+        message: sent
+          ? `Test reminder sent to ${sent === 1 ? 'this device' : `${sent} devices`}.`
+          : `No device took the test reminder (${devices} subscribed). Turn reminders on again.`,
+      })
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : 'Could not send a test reminder.' })
     }
   }
 
@@ -422,6 +465,11 @@ export default function App() {
             {notify !== 'unsupported' && notify !== 'granted' && (
               <button className="nav-item" onClick={enableReminders} disabled={notify === 'denied'}>
                 <Bell /> {notify === 'denied' ? 'Reminders blocked' : 'Turn on reminders'}
+              </button>
+            )}
+            {pushOn && (
+              <button className="nav-item" onClick={testReminder} title="Check that pushed reminders reach this device">
+                <Bell /> Send a test reminder
               </button>
             )}
             <button
@@ -624,6 +672,7 @@ export default function App() {
           presetIcon={formFor.preset?.icon}
           onSave={saveHabit}
           onClose={() => setFormFor(null)}
+          pushed={pushOn}
         />
       )}
 

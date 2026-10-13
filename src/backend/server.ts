@@ -83,4 +83,19 @@ export const serverBackend: Backend = {
   async setEntry(_user, habitId, date, patch) {
     await call('PUT', 'entries', { habitId, date, patch })
   },
+
+  push: {
+    async publicKey() {
+      return (await call<{ publicKey: string }>('GET', 'push/key')).publicKey
+    },
+    async subscribe(subscription, timeZone) {
+      await call('POST', 'push/subscribe', { subscription, timeZone })
+    },
+    async unsubscribe(endpoint) {
+      await call('POST', 'push/unsubscribe', { endpoint })
+    },
+    test() {
+      return call<{ sent: number; devices: number }>('POST', 'push/test')
+    },
+  },
 }
