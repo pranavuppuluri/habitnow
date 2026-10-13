@@ -118,6 +118,10 @@ export const localBackend: Backend = {
     return readData(user.id)
   },
 
+  async replaceData(user, data) {
+    writeData(user.id, data)
+  },
+
   async createHabit(user, draft, position) {
     const data = readData(user.id)
     const habit: Habit = {

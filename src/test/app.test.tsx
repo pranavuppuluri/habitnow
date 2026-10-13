@@ -200,3 +200,47 @@ test('a GitHub habit fills itself in from the contribution graph', async () => {
   const graph = screen.getByRole('img', { name: '8 GitHub contributions in the last year' })
   expect(graph.querySelectorAll('rect').length).toBeGreaterThan(360)
 })
+
+test('a backup exports to a file and restores on another device', async () => {
+  seed()
+  let saved: Blob | null = null
+  vi.stubGlobal('URL', { ...URL, createObjectURL: (blob: Blob) => ((saved = blob), 'blob:backup'), revokeObjectURL: () => {} })
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+  const first = render(<App />)
+  fireEvent.click(await screen.findByText('Export data'))
+  await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/Backup saved: 2 habits, 1 area/))
+  expect((click.mock.instances[0] as unknown as HTMLAnchorElement).download).toMatch(/^habitnow-backup-\d{4}-\d{2}-\d{2}\.json$/)
+  const text = await saved!.text()
+  first.unmount()
+
+  // A fresh browser: same account, nothing stored. Import puts it all back.
+  localStorage.removeItem('habitnow.data.v1.test-user')
+  vi.stubGlobal('confirm', () => true)
+  render(<App />)
+  await screen.findByText('Import data')
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement
+  fireEvent.change(input, { target: { files: [new File([text], 'habitnow-backup.json')] } })
+
+  const main = document.querySelector('main') as HTMLElement
+  expect(await within(main).findByText('💧 Drink water')).toBeTruthy()
+  const stored = JSON.parse(localStorage.getItem('habitnow.data.v1.test-user')!)
+  expect(stored.habits).toHaveLength(2)
+  expect(Object.keys(stored.entries).length).toBeGreaterThan(50)
+  click.mockRestore()
+})
+
+test('a file that is not a backup is refused and nothing changes', async () => {
+  seed()
+  const confirm = vi.fn(() => true)
+  vi.stubGlobal('confirm', confirm)
+  render(<App />)
+  await screen.findByText('Import data')
+  const before = localStorage.getItem('habitnow.data.v1.test-user')
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement
+  fireEvent.change(input, { target: { files: [new File(['{"hello": 1}'], 'notes.json')] } })
+
+  await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/not a HabitNow backup/))
+  expect(confirm).not.toHaveBeenCalled()
+  expect(localStorage.getItem('habitnow.data.v1.test-user')).toBe(before)
+})
