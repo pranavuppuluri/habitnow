@@ -4,6 +4,7 @@ import { completionSeries, dayShare, habitStats, weekdayBreakdown } from '../lib
 import { colorVar, type AppData, type Habit } from '../lib/types'
 import { TrendChart } from './charts/TrendChart'
 import { WeekdayBars } from './charts/WeekdayBars'
+import { ContributionGraph } from './charts/ContributionGraph'
 import { YearHeat } from './charts/YearHeat'
 
 interface ProgressProps {
@@ -129,9 +130,13 @@ export function Progress({ data, onOpenHabit }: ProgressProps) {
 
       <section className="panel">
         <div className="panel-head">
-          <span className="panel-title">The last year</span>
+          <span className="panel-title">{focused?.github ? 'GitHub contributions' : 'The last year'}</span>
         </div>
-        <YearHeat data={data} habitId={focused?.id} hue={hue} />
+        {focused?.github ? (
+          <ContributionGraph data={data} habit={focused} />
+        ) : (
+          <YearHeat data={data} habitId={focused?.id} hue={hue} />
+        )}
       </section>
 
       {/* Small multiples: hue identifies a habit safely here because each gets its

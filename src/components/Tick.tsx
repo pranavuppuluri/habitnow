@@ -27,7 +27,9 @@ export function Tick({ habit, value, skipped, onClick, size = 38 }: TickProps) {
   const circumference = 2 * Math.PI * r
   const label = skipped
     ? `${habit.name}: skipped today`
-    : done
+    : habit.github
+      ? `${habit.name}: ${value} ${habit.unit} on GitHub, tap to refresh`
+      : done
       ? `${habit.name}: done, tap to undo`
       : counted
         ? `${habit.name}: ${value} of ${habit.target} ${habit.unit}, tap to add one`

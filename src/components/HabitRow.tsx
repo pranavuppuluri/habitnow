@@ -73,6 +73,11 @@ export function HabitRow({ habit, data, date, onTick, onOpen, drag }: HabitRowPr
         <span className="habit-meta">
           {skipped ? (
             <span>Skipped</span>
+          ) : habit.github ? (
+            <span className="mono">
+              {value}
+              {habit.target > 1 && `/${habit.target}`} {habit.unit} on GitHub
+            </span>
           ) : habit.target > 1 ? (
             <span className="mono">
               {value}/{habit.target} {habit.unit}

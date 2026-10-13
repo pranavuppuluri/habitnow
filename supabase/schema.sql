@@ -23,6 +23,7 @@ create table if not exists public.habits (
   area_id      uuid references public.areas on delete set null,
   days         int[] not null default '{0,1,2,3,4,5,6}',
   reminder     text,
+  github       text,
   archived     boolean not null default false,
   position     int  not null default 0,
   created_at   timestamptz not null default now()
@@ -39,6 +40,9 @@ create table if not exists public.entries (
   -- One row per habit per day; the app upserts on this pair.
   unique (habit_id, date)
 );
+
+-- Added after the first release; harmless to re-run on a fresh project.
+alter table public.habits add column if not exists github text;
 
 create index if not exists habits_user_idx  on public.habits (user_id, position);
 create index if not exists entries_user_idx on public.entries (user_id, date);

@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react'
 import { addDays, fromKey, monthName, todayKey, WEEKDAY_SHORT } from '../../lib/date'
 import { dayShare } from '../../lib/stats'
 import type { AppData } from '../../lib/types'
@@ -24,6 +25,13 @@ const HEAD = 14
  * data.
  */
 export function YearHeat({ data, habitId, hue, weeks = 53 }: YearHeatProps) {
+  const scroller = useRef<HTMLDivElement>(null)
+
+  // On a narrow screen the year does not fit: open at the newest weeks.
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (el) el.scrollLeft = el.scrollWidth
+  }, [])
   const { tip, show, hide } = useTooltip()
   const paint = hue ?? 'var(--ink)'
   const today = todayKey()
@@ -53,7 +61,7 @@ export function YearHeat({ data, habitId, hue, weeks = 53 }: YearHeatProps) {
 
   return (
     <ChartHost>
-      <div className="year-scroll">
+      <div className="year-scroll" ref={scroller}>
         <svg
           viewBox={`0 0 ${W} ${H}`}
           width={W}

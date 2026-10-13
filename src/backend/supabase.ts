@@ -25,6 +25,7 @@ interface HabitRow {
   area_id: string | null
   days: number[]
   reminder: string | null
+  github: string | null
   archived: boolean
   position: number
   created_at: string
@@ -50,6 +51,7 @@ function toHabit(row: HabitRow): Habit {
     areaId: row.area_id,
     days: row.days,
     reminder: row.reminder,
+    github: row.github,
     archived: row.archived,
     position: row.position,
     createdAt: row.created_at,
@@ -68,8 +70,10 @@ function toHabitRow(patch: Partial<Habit>): Record<string, unknown> {
   if (patch.areaId !== undefined) row.area_id = patch.areaId
   if (patch.days !== undefined) row.days = patch.days
   if (patch.reminder !== undefined) row.reminder = patch.reminder
+  if (patch.github !== undefined) row.github = patch.github
   if (patch.archived !== undefined) row.archived = patch.archived
   if (patch.position !== undefined) row.position = patch.position
+  if (patch.createdAt !== undefined) row.created_at = patch.createdAt
   return row
 }
 

@@ -37,6 +37,8 @@ export interface Habit {
   days: number[]
   /** "HH:MM" local time, or null for no reminder. */
   reminder: string | null
+  /** A GitHub username whose daily contributions fill this habit in, or null for a habit ticked by hand. */
+  github?: string | null
   archived: boolean
   position: number
   createdAt: string
@@ -70,6 +72,7 @@ export interface HabitDraft {
   areaId: string | null
   days: number[]
   reminder: string | null
+  github?: string | null
 }
 
 export interface AppData {

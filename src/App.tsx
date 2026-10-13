@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { backend, cloudConfigured } from './backend'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { backend } from './backend'
 import { currentBucket, friendlyDate, todayKey } from './lib/date'
 import { storageKey } from './lib/storage'
+import { fetchContributions, planGithubSync, type Contributions } from './lib/github'
 import { dayProgress, getEntry, habitsOn, valueOn } from './lib/stats'
 import {
   EMPTY_DATA,
@@ -60,6 +61,8 @@ export default function App() {
   const [loadError, setLoadError] = useState('')
   const [areasOpen, setAreasOpen] = useState(false)
   const [areaFilter, setAreaFilter] = useState<string | null>(null)
+  // Phones only: the bottom bar has room for the main views, the rest opens from here.
+  const [menuOpen, setMenuOpen] = useState(false)
   const [notify, setNotify] = useState<Permission>(() => reminderPermission())
   // Which row is being dragged, and which row it is currently hovering over.
   const [dragId, setDragId] = useState<string | null>(null)
@@ -121,6 +124,70 @@ export default function App() {
     setView('today')
   }
 
+  // The sync reads the latest data without re-running every time data changes.
+  const dataRef = useRef(data)
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
+
+  /**
+   * Copies GitHub contribution counts into every GitHub-tracked habit. Only
+   * days that differ are written, so a sync with nothing new costs one fetch
+   * per username and no writes. `announce` is for the manual refresh, which
+   * should say what happened; the background ones stay quiet.
+   */
+  const syncGithub = useCallback(
+    async (u: User, announce = false) => {
+      const tracked = dataRef.current.habits.filter((h) => !h.archived && h.github)
+      if (tracked.length === 0) return
+      try {
+        const fetched = new Map<string, Promise<Contributions>>()
+        let written = 0
+        let today = 0
+        for (const habit of tracked) {
+          const name = habit.github!
+          if (!fetched.has(name)) fetched.set(name, fetchContributions(name))
+          const counts = await fetched.get(name)!
+          today = Math.max(today, counts[todayKey()] ?? 0)
+          const plan = planGithubSync(dataRef.current, habit, counts, todayKey())
+          if (plan.backdateTo) {
+            await backend.updateHabit(u, habit.id, { createdAt: `${plan.backdateTo}T00:00:00.000Z` })
+          }
+          for (const { date: day, value } of plan.writes) {
+            await backend.setEntry(u, habit.id, day, { value })
+          }
+          written += plan.writes.length
+        }
+        await refresh(u)
+        if (announce) {
+          const counted = `${today} contribution${today === 1 ? '' : 's'} today`
+          setToast({ message: written ? `GitHub synced. ${counted}.` : `Up to date with GitHub. ${counted}.` })
+        }
+      } catch (e) {
+        if (announce) setToast({ message: e instanceof Error ? e.message : 'Could not sync with GitHub.' })
+      }
+    },
+    [refresh],
+  )
+
+  // Sync when signed in, whenever the set of GitHub habits changes, when the
+  // window comes back into focus, and every 15 minutes while it stays open.
+  const githubKey = data.habits
+    .filter((h) => !h.archived && h.github)
+    .map((h) => `${h.id}:${h.github}`)
+    .join(',')
+  useEffect(() => {
+    if (!user || !githubKey) return
+    syncGithub(user)
+    const onFocus = () => syncGithub(user)
+    window.addEventListener('focus', onFocus)
+    const timer = setInterval(() => syncGithub(user), 15 * 60 * 1000)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      clearInterval(timer)
+    }
+  }, [user, githubKey, syncGithub])
+
   const mutate = useCallback(
     async (job: (u: User) => Promise<void>) => {
       if (!user) return
@@ -137,6 +204,11 @@ export default function App() {
   /** One tap: adds a unit, or clears the day once the target is met. */
   const tick = useCallback(
     (habit: Habit) => {
+      // GitHub fills these in itself; a tap asks it for the latest instead.
+      if (habit.github) {
+        if (user) syncGithub(user, true)
+        return
+      }
       const before = valueOn(data, habit.id, date)
       const skipped = getEntry(data, habit.id, date)?.skipped ?? false
       const next = skipped ? 1 : before >= habit.target ? 0 : before + 1
@@ -153,7 +225,7 @@ export default function App() {
         })
       }
     },
-    [data, date, mutate],
+    [data, date, mutate, user, syncGithub],
   )
 
   const active = useMemo(() => data.habits.filter((h) => !h.archived), [data.habits])
@@ -295,70 +367,84 @@ export default function App() {
           {data.areas.length > 0 && <span className="count">{data.areas.length}</span>}
         </button>
 
-        {data.areas.length > 0 && (
-          <>
-            <div className="nav-label">Filter by area</div>
-            <button className="nav-item" aria-current={areaFilter === null} onClick={() => setAreaFilter(null)}>
-              All habits
-            </button>
-            {data.areas.map((area) => (
-              <button
-                key={area.id}
-                className="nav-item"
-                aria-current={areaFilter === area.id}
-                onClick={() => setAreaFilter(area.id)}
-              >
-                {area.name}
-                <span className="count">{active.filter((h) => h.areaId === area.id).length}</span>
-              </button>
-            ))}
-          </>
-        )}
+        <button
+          className="nav-item nav-me"
+          aria-expanded={menuOpen}
+          aria-label="More"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <span className="avatar">{initials}</span>
+          More
+        </button>
 
-        {active.length > 0 && (
-          <>
-            <div className="nav-label">Habits</div>
-            {active.map((habit) => (
-              <button
-                key={habit.id}
-                className="nav-item"
-                onClick={() => {
-                  setView('today')
-                  setDetailId(habit.id)
-                }}
-              >
-                <span className="nav-dot" style={{ background: colorVar(habit.color) }} />
-                {habit.name}
+        {/* On a desktop this is just the rest of the sidebar; on a phone it is the "More" menu. */}
+        <div className="nav-more" data-open={menuOpen} onClick={() => setMenuOpen(false)}>
+          {data.areas.length > 0 && (
+            <>
+              <div className="nav-label">Filter by area</div>
+              <button className="nav-item" aria-current={areaFilter === null} onClick={() => setAreaFilter(null)}>
+                All habits
               </button>
-            ))}
-          </>
-        )}
-
-        <div className="sidebar-foot">
-          {notify !== 'unsupported' && notify !== 'granted' && (
-            <button className="nav-item" onClick={enableReminders} disabled={notify === 'denied'}>
-              <Bell /> {notify === 'denied' ? 'Reminders blocked' : 'Turn on reminders'}
-            </button>
+              {data.areas.map((area) => (
+                <button
+                  key={area.id}
+                  className="nav-item"
+                  aria-current={areaFilter === area.id}
+                  onClick={() => setAreaFilter(area.id)}
+                >
+                  {area.name}
+                  <span className="count">{active.filter((h) => h.areaId === area.id).length}</span>
+                </button>
+              ))}
+            </>
           )}
-          <button
-            className="nav-item"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-          >
-            {theme === 'dark' ? <Sun /> : <Moon />} {theme === 'dark' ? 'Light' : 'Dark'}
-          </button>
-          <button className="nav-item" onClick={signOut}>
-            <Exit /> Sign out
-          </button>
-          <div className="who">
-            <span className="avatar">{initials}</span>
-            <span className="who-text">
-              <span className="who-name">{user.name || user.email}</span>
-              <span className="who-mode">{cloudConfigured ? 'synced' : 'this device'}</span>
-            </span>
+
+          {active.length > 0 && (
+            <div className="nav-habits">
+              <div className="nav-label">Habits</div>
+              {active.map((habit) => (
+                <button
+                  key={habit.id}
+                  className="nav-item"
+                  onClick={() => {
+                    setView('today')
+                    setDetailId(habit.id)
+                  }}
+                >
+                  <span className="nav-dot" style={{ background: colorVar(habit.color) }} />
+                  {habit.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="sidebar-foot">
+            {notify !== 'unsupported' && notify !== 'granted' && (
+              <button className="nav-item" onClick={enableReminders} disabled={notify === 'denied'}>
+                <Bell /> {notify === 'denied' ? 'Reminders blocked' : 'Turn on reminders'}
+              </button>
+            )}
+            <button
+              className="nav-item"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            >
+              {theme === 'dark' ? <Sun /> : <Moon />} {theme === 'dark' ? 'Light' : 'Dark'}
+            </button>
+            <button className="nav-item" onClick={signOut}>
+              <Exit /> Sign out
+            </button>
+            <div className="who">
+              <span className="avatar">{initials}</span>
+              <span className="who-text">
+                <span className="who-name">{user.name || user.email}</span>
+                <span className="who-mode">{backend.mode === 'server' ? 'on server' : backend.mode === 'cloud' ? 'synced' : 'this device'}</span>
+              </span>
+            </div>
           </div>
         </div>
       </aside>
+      {menuOpen && <div className="nav-scrim" onClick={() => setMenuOpen(false)} />}
 
       <main className="main">
         <div className="main-inner">
@@ -558,6 +644,7 @@ export default function App() {
           }}
           onDelete={() => deleteHabit(detail)}
           onArchive={() => archiveHabit(detail)}
+          onRefresh={() => syncGithub(user, true)}
           onMove={(delta) => moveHabit(detail, delta)}
           canMoveUp={orderedActive.findIndex((h) => h.id === detail.id) > 0}
           canMoveDown={
@@ -591,3 +678,4 @@ export default function App() {
     </div>
   )
 }
+

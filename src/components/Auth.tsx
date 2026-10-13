@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { backend, cloudConfigured } from '../backend'
+import { backend } from '../backend'
 import type { User } from '../lib/types'
 import { Logo } from './icons'
 
@@ -112,7 +112,12 @@ export function Auth({ onSignedIn }: AuthProps) {
         </form>
 
         <p className="mode-note">
-          {cloudConfigured ? (
+          {backend.mode === 'server' ? (
+            <>
+              <strong>Saved on your HabitNow server.</strong> Your habits are kept on the server's own disk, so
+              any browser on your network that signs in sees the same data.
+            </>
+          ) : backend.mode === 'cloud' ? (
             <>
               <strong>Synced account.</strong> Your habits are stored in the cloud, so they follow you to any
               browser or device you sign in from.
@@ -120,7 +125,7 @@ export function Auth({ onSignedIn }: AuthProps) {
           ) : (
             <>
               <strong>This device only.</strong> No server is configured yet, so the account and its habits stay in
-              this browser. Add Supabase keys to switch on accounts that sync everywhere — see the README.
+              this browser. Add Supabase keys to switch on accounts that sync everywhere. See the README.
             </>
           )}
         </p>

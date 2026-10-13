@@ -7,8 +7,8 @@ export interface EntryPatch {
 }
 
 export interface Backend {
-  /** 'cloud' when Supabase keys are configured, otherwise 'device'. */
-  mode: 'cloud' | 'device'
+  /** 'server' for a self-hosted build, 'cloud' when Supabase keys are configured, otherwise 'device'. */
+  mode: 'server' | 'cloud' | 'device'
   currentUser(): Promise<User | null>
   signUp(email: string, password: string, name: string): Promise<User>
   signIn(email: string, password: string): Promise<User>

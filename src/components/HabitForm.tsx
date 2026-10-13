@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { WEEKDAY_SHORT } from '../lib/date'
+import { cleanUsername, validUsername } from '../lib/github'
 import {
   COLOR_KEYS,
   COLOR_LABELS,
@@ -17,6 +18,7 @@ const ICONS = [
   '💧', '🏃', '📖', '🧘', '🥗', '💪', '😴', '🦷', '✍️', '🎸',
   '🧹', '💊', '☀️', '🚶', '🧴', '📵', '🙏', '🎯', '🌱', '💸',
   '🗣️', '🧠', '🍎', '🚭', '📝', '🎨', '🛏️', '☕', '🐕', '📞',
+  '💻', '🚀',
 ]
 
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
@@ -42,6 +44,7 @@ function initial(habit: Habit | null, presetName?: string, presetIcon?: string):
       areaId: habit.areaId,
       days: habit.days,
       reminder: habit.reminder,
+      github: habit.github ?? null,
     }
   }
   return {
@@ -54,6 +57,7 @@ function initial(habit: Habit | null, presetName?: string, presetIcon?: string):
     areaId: null,
     days: EVERY_DAY,
     reminder: null,
+    github: null,
   }
 }
 
@@ -70,7 +74,25 @@ export function HabitForm({ habit, areas, presetName, presetIcon, onSave, onClos
     set('days', next)
   }
 
+  /** Switching to GitHub fills in sensible defaults without overwriting anything typed. */
+  function trackGithub(on: boolean) {
+    setDraft((d) => ({
+      ...d,
+      github: on ? (d.github ?? '') : null,
+      unit: on && (d.unit === 'times' || !d.unit) ? 'contributions' : !on && d.unit === 'contributions' ? 'times' : d.unit,
+      icon: on && d.icon === '🎯' ? '💻' : d.icon,
+      // Green by default, so the contribution graph looks like the one on github.com.
+      color: on && d.github == null ? 'green' : d.color,
+      name: on && !d.name.trim() ? 'Contribute on GitHub' : d.name,
+    }))
+  }
+
   async function submit() {
+    const github = draft.github === null || draft.github === undefined ? null : cleanUsername(draft.github)
+    if (github !== null && !validUsername(github)) {
+      setError('Enter a GitHub username, like octocat.')
+      return
+    }
     if (!draft.name.trim()) {
       setError('Give the habit a name.')
       return
@@ -82,7 +104,7 @@ export function HabitForm({ habit, areas, presetName, presetIcon, onSave, onClos
     setSaving(true)
     setError('')
     try {
-      await onSave({ ...draft, name: draft.name.trim(), target: Math.max(1, draft.target) })
+      await onSave({ ...draft, github, name: draft.name.trim(), target: Math.max(1, draft.target) })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the habit.')
       setSaving(false)
@@ -106,6 +128,38 @@ export function HabitForm({ habit, areas, presetName, presetIcon, onSave, onClos
       }
     >
       {error && <p className="alert">{error}</p>}
+
+      <div className="field">
+        <span className="field-label">Tracked by</span>
+        <div className="chips">
+          <button className="chip" aria-pressed={draft.github == null} onClick={() => trackGithub(false)}>
+            Ticking it off
+          </button>
+          <button className="chip" aria-pressed={draft.github != null} onClick={() => trackGithub(true)}>
+            GitHub contributions
+          </button>
+        </div>
+      </div>
+
+      {draft.github != null && (
+        <div className="field">
+          <label htmlFor="habit-github">GitHub username</label>
+          <input
+            id="habit-github"
+            className="input mono"
+            value={draft.github}
+            placeholder="octocat"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            onChange={(e) => set('github', e.target.value)}
+          />
+          <p className="help">
+            Each day fills in from the public contribution graph on your GitHub profile, including the past
+            year. Private work only counts if your profile shows private contributions.
+          </p>
+        </div>
+      )}
 
       <div className="field">
         <label htmlFor="habit-name">Habit</label>
@@ -172,9 +226,11 @@ export function HabitForm({ habit, areas, presetName, presetIcon, onSave, onClos
           />
         </div>
         <p className="help">
-          {draft.target > 1
-            ? `You will tap once per unit until ${draft.target} ${draft.unit || 'units'} are in.`
-            : 'One tap finishes the day.'}
+          {draft.github != null
+            ? `A day counts once GitHub shows ${draft.target} ${draft.unit || 'contributions'}.`
+            : draft.target > 1
+              ? `You will tap once per unit until ${draft.target} ${draft.unit || 'units'} are in.`
+              : 'One tap finishes the day.'}
         </p>
       </div>
 

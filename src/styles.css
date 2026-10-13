@@ -233,6 +233,17 @@ button {
   padding-top: 20px;
 }
 
+/* The "More" button and its menu only exist as such on phones; on a desktop the
+   menu's contents are just the lower part of the sidebar. */
+.nav-me,
+.nav-scrim {
+  display: none;
+}
+
+.nav-more {
+  display: contents;
+}
+
 .who {
   display: flex;
   align-items: center;
@@ -255,6 +266,8 @@ button {
 }
 
 .who-text {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 
@@ -1494,28 +1507,139 @@ h1 {
     flex-direction: row;
     align-items: center;
     gap: 2px;
-    padding: 6px 8px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
     border-right: 0;
     border-top: 1px solid var(--line);
-    overflow-x: auto;
+    overflow: visible;
   }
 
   .brand,
-  .nav-label,
-  .sidebar-foot,
-  .who-text {
+  .nav-label {
     display: none;
   }
 
   .nav-item {
+    flex: 1 1 0;
+    min-width: 0;
     flex-direction: column;
     gap: 3px;
-    padding: 7px 12px;
+    padding: 7px 4px;
     font-size: 11px;
+    white-space: nowrap;
+    text-align: center;
   }
 
   .nav-item .count {
     display: none;
+  }
+
+  .nav-me {
+    display: flex;
+  }
+
+  .nav-me .avatar {
+    width: 18px;
+    height: 18px;
+    font-size: 10px;
+  }
+
+  /* The "More" menu: areas, theme, reminders and sign out, above the bar. */
+  .nav-more {
+    display: none;
+  }
+
+  .nav-more[data-open="true"] {
+    position: fixed;
+    right: 8px;
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: min(280px, calc(100vw - 16px));
+    max-height: 70dvh;
+    padding: 8px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    animation: rise 0.16s ease-out;
+  }
+
+  .nav-more .nav-label {
+    display: block;
+    padding: 8px 10px 4px;
+  }
+
+  .nav-more .nav-item {
+    flex: none;
+    flex-direction: row;
+    gap: 10px;
+    padding: 10px;
+    font-size: 14px;
+    text-align: left;
+  }
+
+  .nav-more .nav-item .count {
+    display: inline;
+  }
+
+  .nav-habits {
+    display: none;
+  }
+
+  .sidebar-foot {
+    margin: 0;
+    padding: 0;
+  }
+
+  .nav-more .who {
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+
+  .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+
+  .rail-step {
+    width: 26px;
+  }
+
+  .rail-day {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  /* Sheets rise from the bottom edge, full width, like a phone's own. */
+  .scrim {
+    align-items: flex-end;
+    padding: 24px 0 0;
+  }
+
+  .sheet,
+  .sheet.is-wide {
+    max-width: none;
+    max-height: 92dvh;
+    border-bottom: 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+  }
+
+  .sheet-head {
+    padding: 16px 16px 12px;
+  }
+
+  .sheet-body {
+    padding: 16px;
+  }
+
+  .sheet-foot {
+    padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
   }
 
   .main-inner {
@@ -1527,12 +1651,12 @@ h1 {
   }
 
   .fab {
-    bottom: 78px;
+    bottom: calc(78px + env(safe-area-inset-bottom));
     right: 16px;
   }
 
   .toast {
-    bottom: 80px;
+    bottom: calc(80px + env(safe-area-inset-bottom));
   }
 
   .thread {
@@ -1544,9 +1668,27 @@ h1 {
   }
 }
 
+@media (max-width: 480px) {
+  .wide-only {
+    display: none;
+  }
+
+  /* The day count is the least needed column; the rest fit a phone. */
+  .table th:nth-child(5),
+  .table td:nth-child(5) {
+    display: none;
+  }
+
+  .table td,
+  .table th {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+}
+
 @media (max-width: 420px) {
   .rail-step {
-    width: 24px;
+    width: 22px;
   }
 
   .rail-today {
@@ -1681,6 +1823,49 @@ h1 {
 .year-scroll svg {
   display: block;
   max-width: none;
+}
+
+/* GitHub contribution graph */
+.gh-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.gh-head strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.gh-body {
+  display: flex;
+  min-width: 0;
+}
+
+.gh-body .year-scroll {
+  flex: 1;
+  min-width: 0;
+}
+
+.gh-days {
+  flex: 0 0 auto;
+}
+
+.gh-link {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  text-decoration: none;
+}
+
+.gh-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 
 /* period switcher */

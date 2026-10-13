@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { friendlyDate, fromKey } from '../lib/date'
 import { getEntry, habitStats } from '../lib/stats'
 import { colorVar, type AppData, type Habit } from '../lib/types'
+import { ContributionGraph } from './charts/ContributionGraph'
 import { StreakCalendar } from './charts/StreakCalendar'
 import { YearHeat } from './charts/YearHeat'
 import { Sheet } from './Sheet'
@@ -14,6 +15,8 @@ interface HabitDetailProps {
   onSetValue: (value: number) => void
   onSkip: () => void
   onNote: (note: string) => void
+  /** Pulls the latest counts for a GitHub-tracked habit. */
+  onRefresh: () => void
   onEdit: () => void
   onDelete: () => void
   onArchive: () => void
@@ -31,6 +34,7 @@ export function HabitDetail({
   onSetValue,
   onSkip,
   onNote,
+  onRefresh,
   onEdit,
   onDelete,
   onArchive,
@@ -70,11 +74,16 @@ export function HabitDetail({
       wide
       footer={
         <>
-          <button className="btn btn-danger" onClick={onDelete}>
-            <Trash /> Delete
+          <button className="btn btn-danger" onClick={onDelete} aria-label="Delete">
+            <Trash /> <span className="wide-only">Delete</span>
           </button>
-          <button className="btn btn-quiet" onClick={onArchive} title="Keep the history, hide it from Today">
-            <Archive /> Archive
+          <button
+            className="btn btn-quiet"
+            onClick={onArchive}
+            aria-label="Archive"
+            title="Keep the history, hide it from Today"
+          >
+            <Archive /> <span className="wide-only">Archive</span>
           </button>
           <span className="spacer" />
           <button className="btn btn-quiet" onClick={onEdit}>
@@ -89,21 +98,37 @@ export function HabitDetail({
       <div className="field">
         <span className="field-label">{friendlyDate(date)}</span>
         <div className="row">
-          <div className="stepper">
-            <button onClick={() => onSetValue(Math.max(0, value - 1))} disabled={value === 0} aria-label="One fewer">
-              &minus;
-            </button>
-            <span className="stepper-val">
-              {value}
-              <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>
-                {' '}
-                / {habit.target} {habit.unit}
+          {habit.github ? (
+            <div className="stepper">
+              <span className="stepper-val">
+                {value}
+                <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>
+                  {' '}
+                  {habit.target > 1 && `/ ${habit.target} `}
+                  {habit.unit}
+                </span>
               </span>
-            </span>
-            <button onClick={() => onSetValue(value + 1)} aria-label="One more">
-              +
-            </button>
-          </div>
+              <button onClick={onRefresh} aria-label="Refresh from GitHub" title={`Refresh from github.com/${habit.github}`}>
+                &#8635;
+              </button>
+            </div>
+          ) : (
+            <div className="stepper">
+              <button onClick={() => onSetValue(Math.max(0, value - 1))} disabled={value === 0} aria-label="One fewer">
+                &minus;
+              </button>
+              <span className="stepper-val">
+                {value}
+                <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>
+                  {' '}
+                  / {habit.target} {habit.unit}
+                </span>
+              </span>
+              <button onClick={() => onSetValue(value + 1)} aria-label="One more">
+                +
+              </button>
+            </div>
+          )}
           <button
             className="btn btn-quiet"
             style={{ flex: '0 0 auto' }}
@@ -167,9 +192,13 @@ export function HabitDetail({
 
       <section className="panel">
         <div className="panel-head">
-          <span className="panel-title">The last year</span>
+          <span className="panel-title">{habit.github ? 'GitHub contributions' : 'The last year'}</span>
         </div>
-        <YearHeat data={data} habitId={habit.id} hue={color} weeks={40} />
+        {habit.github ? (
+          <ContributionGraph data={data} habit={habit} />
+        ) : (
+          <YearHeat data={data} habitId={habit.id} hue={color} weeks={40} />
+        )}
       </section>
 
       <div className="field" style={{ marginTop: 18, marginBottom: 0 }}>

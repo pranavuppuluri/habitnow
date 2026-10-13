@@ -1,0 +1,18 @@
+# HabitNow on Hostinger (Apache). Copied into dist/ by the build.
+
+Options -Indexes
+
+# Every address serves the app; navigation is state, not routes.
+ErrorDocument 404 /index.html
+
+<IfModule mod_headers.c>
+  # The page, service worker and manifest must revalidate, or a deploy would
+  # stay invisible until the cache expired.
+  <FilesMatch "\.(html|webmanifest)$|^(sw|registerSW)\.js$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  # Bundles in assets/ carry a content hash in their name, so they never change.
+  <If "%{REQUEST_URI} =~ m#^/assets/#">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+</IfModule>

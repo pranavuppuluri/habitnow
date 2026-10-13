@@ -1,0 +1,19 @@
+# systemd unit for the self-hosted HabitNow server on the Raspberry Pi.
+# Installed to /etc/systemd/system/ by scripts/deploy-pi.sh.
+[Unit]
+Description=HabitNow habit tracker (self-hosted)
+After=network.target
+
+[Service]
+User=pranav
+WorkingDirectory=/home/pranav/habitnow
+Environment=PORT=8080
+Environment=HOST=0.0.0.0
+Environment=DATA_DIR=/home/pranav/habitnow/data
+Environment=APP_DIR=/home/pranav/habitnow/app
+ExecStart=/usr/bin/node /home/pranav/habitnow/server/habitnow-server.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

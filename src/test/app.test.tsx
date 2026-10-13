@@ -7,7 +7,7 @@
  * would: sign up, add a habit, check it off, open the views.
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from '../App'
 import { addDays, todayKey } from '../lib/date'
 
@@ -64,7 +64,10 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 test('a signed-out visitor lands on sign-up', async () => {
   render(<App />)
@@ -161,4 +164,39 @@ test('areas can be created from the Areas screen', async () => {
 
   // It lands in the dialog list and in the sidebar filter, so expect both.
   await waitFor(() => expect(screen.getAllByText('Focus').length).toBeGreaterThan(0))
+})
+
+test('a GitHub habit fills itself in from the contribution graph', async () => {
+  seed({ withHistory: false })
+  const today = todayKey()
+  const contributions = [-3, -2, -1, 0].map((offset) => ({
+    date: addDays(today, offset),
+    count: offset === -2 ? 0 : 4 + offset,
+  }))
+  const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ contributions })))
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<App />)
+  fireEvent.click((await screen.findAllByText('New habit'))[0])
+  fireEvent.click(screen.getByText('GitHub contributions'))
+  fireEvent.change(screen.getByLabelText('GitHub username'), { target: { value: '@octocat' } })
+  fireEvent.click(screen.getByText('Add habit'))
+
+  const main = document.querySelector('main') as HTMLElement
+  expect(await within(main).findByText('4 contributions on GitHub')).toBeTruthy()
+  expect(String(fetchMock.mock.calls[0][0])).toContain('/octocat?y=last')
+
+  // Earlier contributions count as history: the habit was backdated to the
+  // first one, so yesterday and the day before that keep a streak going.
+  const stored = JSON.parse(localStorage.getItem('habitnow.data.v1.test-user')!)
+  const gh = stored.habits.find((h: { github?: string }) => h.github === 'octocat')
+  expect(gh.createdAt.slice(0, 10)).toBe(addDays(today, -3))
+  expect(stored.entries[`${gh.id}:${addDays(today, -1)}`].value).toBe(3)
+  expect(stored.entries[`${gh.id}:${addDays(today, -2)}`]).toBeUndefined()
+
+  // The detail sheet draws GitHub's own graph: total for the year, a cell per day.
+  fireEvent.click(within(main).getByText('4 contributions on GitHub'))
+  expect(await screen.findByText('GitHub contributions')).toBeTruthy()
+  const graph = screen.getByRole('img', { name: '8 GitHub contributions in the last year' })
+  expect(graph.querySelectorAll('rect').length).toBeGreaterThan(360)
 })
