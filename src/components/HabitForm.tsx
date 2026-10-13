@@ -299,7 +299,7 @@ export function HabitForm({ habit, areas, presetName, presetIcon, onSave, onClos
       {draft.reminder && (
         <p className="help" style={{ marginTop: -6 }}>
           Reminders arrive while HabitNow is open, including in a background tab or
-          the installed app. They cannot reach you once it is fully closed — that needs
+          the installed app. They cannot reach you once it is fully closed; that needs
           a server to send them.
         </p>
       )}
