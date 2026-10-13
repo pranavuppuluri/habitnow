@@ -139,16 +139,25 @@ colours apart.
 
 ## Reminders, honestly
 
-Reminders are local notifications scheduled by the open page. They fire while
-HabitNow is open — a background tab counts, and so does the installed app — and
-they do **not** fire once it is fully closed.
+**On the self-hosted Pi, reminders arrive even with the app closed.** The server
+keeps each browser's push subscription, checks every 20 seconds which reminders
+are due in that browser's own time zone, and sends a Web Push for any habit not
+yet done or skipped. The service worker shows it. A reminder missed while the
+server was down still goes out up to 10 minutes late, and a log on disk means a
+restart never sends one twice. **More → Send a test reminder** checks it end to
+end. Push needs HTTPS (see [HTTPS for phones](#https-for-phones)), and on an
+iPhone it only works once HabitNow is added to the home screen.
 
-Firing when the app is closed needs a server to send a push message: a service
-worker only shows a notification when something wakes it, and nothing on static
-hosting does that on a schedule. (The browser API that would have allowed true
-offline scheduling never shipped.) So background reminders are a cloud-backend
-feature — a scheduled job sending Web Push — and until that exists, this is the
-version that does not overpromise.
+The push code is `server/webpush.mjs`: VAPID signing (RFC 8292) and payload
+encryption (RFC 8291) with nothing but `node:crypto`, tested against the RFC's
+own example. Set `VAPID_SUBJECT` to a `mailto:` or `https:` contact if you like;
+push services use it to reach the sender.
+
+**Everywhere else** (GitHub Pages, your own domain, cloud mode), reminders are
+local notifications scheduled by the open page. They fire while HabitNow is
+open, including a background tab or the installed app, and not once it is fully
+closed: a service worker only shows a notification when something wakes it,
+and nothing on static hosting does that on a schedule.
 
 ## Run it locally
 

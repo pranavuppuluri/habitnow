@@ -15,6 +15,14 @@
  *   sessions.json         session token -> user id
  *   habits/<userId>.json  that user's AppData (habits, areas, entries)
  *   backups/YYYY-MM-DD/   a daily copy of all of the above, last 30 kept
+ *   vapid.json            this server's Web Push key pair, made on first start
+ *   push/<userId>.json    that user's push subscriptions (one per browser)
+ *   push-sent.json        reminders already pushed today, so a restart never repeats one
+ *
+ * Reminders: every PUSH_TICK_MS (20 s) the server checks each subscription's
+ * own time zone for habits whose reminder time has come and that are not done
+ * yet, and sends a Web Push. That is what makes reminders arrive with the app
+ * closed. Set VAPID_SUBJECT to a mailto: or https: contact for push services.
  *
  * The mutation logic mirrors src/backend/local.ts so both backends behave the
  * same; change them together.
@@ -25,6 +33,7 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypt
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { generateVapidKeys, sendPush } from './webpush.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT ?? 8080)
@@ -41,7 +50,16 @@ const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json')
 const HABITS_DIR = path.join(DATA_DIR, 'habits')
 const BACKUPS_DIR = path.join(DATA_DIR, 'backups')
 
+const PUSH_DIR = path.join(DATA_DIR, 'push')
+const VAPID_FILE = path.join(DATA_DIR, 'vapid.json')
+const SENT_FILE = path.join(DATA_DIR, 'push-sent.json')
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT ?? 'https://github.com/pranavuppuluri/habitnow'
+const PUSH_TICK_MS = Number(process.env.PUSH_TICK_MS ?? 20_000)
+/** A reminder missed while the server was down still goes out if it is this recent. */
+const LATE_MINUTES = 10
+
 fs.mkdirSync(HABITS_DIR, { recursive: true })
+fs.mkdirSync(PUSH_DIR, { recursive: true })
 
 // ---------------------------------------------------------------- storage --
 
@@ -79,6 +97,116 @@ function readData(userId) {
 
 function writeData(userId, data) {
   writeJSON(habitsFile(userId), data)
+}
+
+// ------------------------------------------------------------------- push --
+
+function vapidKeys() {
+  const existing = readJSON(VAPID_FILE, null)
+  if (existing) return existing
+  const fresh = generateVapidKeys()
+  writeJSON(VAPID_FILE, fresh)
+  return fresh
+}
+const vapid = vapidKeys()
+
+const pushFile = (userId) => path.join(PUSH_DIR, `${userId}.json`)
+const subscriptionsOf = (userId) => readJSON(pushFile(userId), [])
+const saveSubscriptions = (userId, subs) => writeJSON(pushFile(userId), subs)
+
+function validTimeZone(zone) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** The local calendar day, weekday and minute of the day in a time zone. */
+function localClock(timeZone, now) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    })
+      .formatToParts(now)
+      .map((p) => [p.type, p.value]),
+  )
+  const date = `${parts.year}-${parts.month}-${parts.day}`
+  return { date, weekday: new Date(`${date}T12:00:00Z`).getUTCDay(), minutes: Number(parts.hour) * 60 + Number(parts.minute) }
+}
+
+function reminderMinutes(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm ?? '')
+  return m && Number(m[1]) < 24 && Number(m[2]) < 60 ? Number(m[1]) * 60 + Number(m[2]) : null
+}
+
+/** The same words the app's own local reminders use. */
+function reminderMessage(habit) {
+  return {
+    title: `${habit.icon} ${habit.name}`,
+    body: habit.target > 1 ? `Time for your ${habit.target} ${habit.unit}.` : 'Time to check this one off.',
+    tag: `habitnow-${habit.id}`,
+    url: './',
+  }
+}
+
+/** Sends to one subscription, forgetting it if the push service says it is gone. */
+async function pushTo(userId, sub, message) {
+  try {
+    if ((await sendPush(sub, message, vapid, VAPID_SUBJECT)) === 'gone') {
+      saveSubscriptions(userId, subscriptionsOf(userId).filter((s) => s.endpoint !== sub.endpoint))
+      return false
+    }
+    return true
+  } catch (err) {
+    console.error(`push to ${new URL(sub.endpoint).host} failed: ${err.message}`)
+    return false
+  }
+}
+
+let ticking = false
+
+/** Pushes every reminder that has come due and is not done, once per device per day. */
+async function pushDueReminders(now = new Date()) {
+  if (ticking) return
+  ticking = true
+  try {
+    const sent = readJSON(SENT_FILE, {})
+    let changed = false
+    for (const file of fs.readdirSync(PUSH_DIR)) {
+      if (!file.endsWith('.json')) continue
+      const userId = file.slice(0, -5)
+      const subs = subscriptionsOf(userId)
+      if (subs.length === 0) continue
+      const data = readData(userId)
+      for (const sub of subs) {
+        const clock = localClock(sub.timeZone, now)
+        for (const habit of data.habits) {
+          if (habit.archived || !habit.days.includes(clock.weekday)) continue
+          const at = reminderMinutes(habit.reminder)
+          if (at === null || clock.minutes < at || clock.minutes - at > LATE_MINUTES) continue
+          const entry = data.entries[`${habit.id}:${clock.date}`]
+          if (entry?.skipped || (entry?.value ?? 0) >= habit.target) continue
+          const key = `${sub.endpoint}|${habit.id}|${clock.date}`
+          if (sent[key]) continue
+          sent[key] = clock.date
+          changed = true
+          await pushTo(userId, sub, reminderMessage(habit))
+        }
+      }
+    }
+    if (changed) {
+      // Keep only the last two days of the log; older keys can never match again.
+      const cutoff = new Date(now.getTime() - 2 * 86_400_000).toISOString().slice(0, 10)
+      for (const [key, day] of Object.entries(sent)) if (day < cutoff) delete sent[key]
+      writeJSON(SENT_FILE, sent)
+    }
+  } catch (err) {
+    console.error('reminder check failed:', err)
+  } finally {
+    ticking = false
+  }
 }
 
 function backupToday() {
@@ -217,6 +345,43 @@ const routes = [
 
   ['GET', /^\/api\/data$/, (req, res, body, user) => readData(user.id)],
 
+  ['GET', /^\/api\/push\/key$/, () => ({ publicKey: vapid.publicKey })],
+
+  ['POST', /^\/api\/push\/subscribe$/, (req, res, body, user) => {
+    const sub = body.subscription
+    // PUSH_ALLOW_HTTP is only for the fake push service in the tests; real ones are all HTTPS.
+    if (typeof sub?.endpoint !== 'string' || (!/^https:\/\//.test(sub.endpoint) && !process.env.PUSH_ALLOW_HTTP)) {
+      throw new HttpError(400, 'That is not a push subscription.')
+    }
+    if (typeof sub.keys?.p256dh !== 'string' || typeof sub.keys?.auth !== 'string') {
+      throw new HttpError(400, 'That push subscription has no keys.')
+    }
+    const timeZone = validTimeZone(body.timeZone) ? body.timeZone : Intl.DateTimeFormat().resolvedOptions().timeZone
+    // One browser belongs to one account at a time.
+    for (const file of fs.readdirSync(PUSH_DIR)) {
+      const other = file.slice(0, -5)
+      if (other === user.id || !file.endsWith('.json')) continue
+      const subs = subscriptionsOf(other)
+      if (subs.some((s) => s.endpoint === sub.endpoint)) saveSubscriptions(other, subs.filter((s) => s.endpoint !== sub.endpoint))
+    }
+    const mine = subscriptionsOf(user.id).filter((s) => s.endpoint !== sub.endpoint)
+    mine.push({ endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, timeZone, since: new Date().toISOString() })
+    saveSubscriptions(user.id, mine)
+    return { ok: true, timeZone }
+  }],
+
+  ['POST', /^\/api\/push\/unsubscribe$/, (req, res, body, user) => {
+    saveSubscriptions(user.id, subscriptionsOf(user.id).filter((s) => s.endpoint !== body.endpoint))
+    return { ok: true }
+  }],
+
+  ['POST', /^\/api\/push\/test$/, async (req, res, body, user) => {
+    const subs = subscriptionsOf(user.id)
+    const message = { title: 'HabitNow', body: 'Reminders are on. This one came from your server.', tag: 'habitnow-test', url: './' }
+    const results = await Promise.all(subs.map((sub) => pushTo(user.id, sub, message)))
+    return { sent: results.filter(Boolean).length, devices: subs.length }
+  }],
+
   ['POST', /^\/api\/habits$/, (req, res, body, user) =>
     mutate(user.id, (data) => {
       const habit = {
@@ -323,7 +488,7 @@ async function handleApi(req, res, pathname) {
     const body = await readBody(req)
     const user = PUBLIC_ROUTES.has(pathname) ? null : sessionUser(req)
     if (!PUBLIC_ROUTES.has(pathname) && !user) throw new HttpError(401, 'Sign in again.')
-    return sendJSON(res, 200, handler(req, res, body, user, match.slice(1)))
+    return sendJSON(res, 200, await handler(req, res, body, user, match.slice(1)))
   }
   throw new HttpError(404, 'No such endpoint.')
 }
@@ -384,11 +549,16 @@ async function handle(req, res) {
 const server = tls ? createSecureServer(tls, handle) : createServer(handle)
 
 backupToday()
+const reminderTimer = setInterval(() => void pushDueReminders(), PUSH_TICK_MS)
+void pushDueReminders()
 server.listen(PORT, HOST, () => {
   const scheme = tls ? 'https' : 'http'
   console.log(`HabitNow on ${scheme}://${HOST}:${server.address().port}  data=${DATA_DIR}  app=${APP_DIR}`)
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, () => server.close(() => process.exit(0)))
+  process.on(signal, () => {
+    clearInterval(reminderTimer)
+    server.close(() => process.exit(0))
+  })
 }

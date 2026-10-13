@@ -11,9 +11,9 @@
  * Firing when the app is closed needs a push message from a server: a service
  * worker can only show a notification when something wakes it, and nothing on a
  * static host does that on a schedule. The Notification Triggers API, which would
- * have allowed true offline scheduling, never shipped. So background reminders
- * are a cloud-backend feature (a scheduled job sending Web Push), and until that
- * exists the honest version is this one.
+ * have allowed true offline scheduling, never shipped. The self-hosted server
+ * does exactly that (see lib/push.ts); when it is pushing, these local ones are
+ * switched off so nothing arrives twice.
  */
 
 import { todayKey } from './date'

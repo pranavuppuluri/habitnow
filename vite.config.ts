@@ -34,6 +34,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Shows reminders the self-hosted server pushes; harmless elsewhere.
+        importScripts: ['push-sw.js'],
         // Every route is the same SPA shell; hand it back for any navigation.
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
