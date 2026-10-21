@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { AppData, Area, ColorKey, Habit, TimeOfDay } from '../lib/types'
 import { entryKey } from '../lib/stats'
-import { AuthError, type Backend } from './types'
+import { AuthError, type Backend, type EntryPatch } from './types'
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -74,6 +74,20 @@ function toHabitRow(patch: Partial<Habit>): Record<string, unknown> {
   if (patch.archived !== undefined) row.archived = patch.archived
   if (patch.position !== undefined) row.position = patch.position
   if (patch.createdAt !== undefined) row.created_at = patch.createdAt
+  return row
+}
+
+/**
+ * Only the columns in the patch. An upsert writes every column it is given,
+ * so filling in defaults here would reset a check-in when a note is saved,
+ * and wipe the note when a habit is ticked off. The schema defaults cover a
+ * brand-new row; an existing row keeps whatever the patch leaves out.
+ */
+function toEntryRow(userId: string, habitId: string, date: string, patch: EntryPatch): Record<string, unknown> {
+  const row: Record<string, unknown> = { user_id: userId, habit_id: habitId, date }
+  if (patch.value !== undefined) row.value = patch.value
+  if (patch.skipped !== undefined) row.skipped = patch.skipped
+  if (patch.note !== undefined) row.note = patch.note
   return row
 }
 
@@ -164,9 +178,11 @@ export const supabaseBackend: Backend = {
   },
 
   async reorderHabits(_user, ordered) {
-    await Promise.all(
+    const results = await Promise.all(
       ordered.map(({ id, position }) => db().from('habits').update({ position }).eq('id', id)),
     )
+    const failed = results.find((r) => r.error)
+    if (failed) fail('Could not reorder the habits', failed.error)
   },
 
   async createArea(user, name, position) {
@@ -187,17 +203,7 @@ export const supabaseBackend: Backend = {
   async setEntry(user, habitId, date, patch) {
     const { error } = await db()
       .from('entries')
-      .upsert(
-        {
-          user_id: user.id,
-          habit_id: habitId,
-          date,
-          value: patch.value ?? 0,
-          skipped: patch.skipped ?? false,
-          note: patch.note ?? '',
-        },
-        { onConflict: 'habit_id,date' },
-      )
+      .upsert(toEntryRow(user.id, habitId, date, patch), { onConflict: 'habit_id,date' })
     fail('Could not save the check-in', error)
   },
 }
