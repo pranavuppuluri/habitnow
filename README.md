@@ -229,7 +229,9 @@ Then in the repo on GitHub:
    `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Skip this and the deployed
    site runs in device mode.
 3. Push to `main`. [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
-   builds and publishes on every push; watch it under **Actions**.
+   lints, tests, builds and publishes on every push; a red check stops the
+   deploy. [`ci.yml`](.github/workflows/ci.yml) runs the same checks on pull
+   requests. Watch both under **Actions**.
 
 `vite.config.ts` sets `base: './'`, so the same build works at a repo subpath,
 at a domain root, or opened from disk — you don't have to edit a config when you
@@ -298,7 +300,7 @@ src/
   components/
     charts/       hand-drawn SVG: streak calendar, trend, weekday, year heat,
                   GitHub contribution graph
-  test/           render, server and sync tests (jsdom)
+  test/           render, server, cloud backend and sync tests (jsdom)
 server/           zero-dependency Node server and its systemd unit
 scripts/          palette search, icons, Pi and Hostinger deploys
 supabase/         schema.sql, tables and row-level security

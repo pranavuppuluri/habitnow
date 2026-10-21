@@ -28,6 +28,11 @@ jobs:
 
       - run: npm ci
 
+      # A deploy that fails lint or tests never reaches Pages. The same checks
+      # run on pull requests in ci.yml, so a red PR is caught before merge.
+      - run: npm run lint
+      - run: npm test
+
       # Both are read at build time and baked into the bundle. The anon key is
       # designed to be public; row-level security is what keeps data private.
       # Leave them unset and the app falls back to device-only accounts.
