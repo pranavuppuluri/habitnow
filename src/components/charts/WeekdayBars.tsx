@@ -57,7 +57,7 @@ export function WeekdayBars({ stats, hue }: WeekdayBarsProps) {
                 }}
               />
             </span>
-            <span className="wd-val mono">{s.scheduled ? pct(s.rate) : '—'}</span>
+            <span className="wd-val mono">{s.scheduled ? pct(s.rate) : '-'}</span>
           </div>
         ))}
       </div>

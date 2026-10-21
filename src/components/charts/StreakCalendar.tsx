@@ -233,7 +233,7 @@ export function StreakCalendar({ data, habit, year, month, onShift, onPick }: St
                   }
                   onClick={() => onPick?.(day)}
                 >
-                  <title>{`${d.getDate()} ${monthName(month)} — ${label[state]}`}</title>
+                  <title>{`${d.getDate()} ${monthName(month)}: ${label[state]}`}</title>
                 </rect>
               </g>
             )
