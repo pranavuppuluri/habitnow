@@ -185,4 +185,8 @@ export const localBackend: Backend = {
     else data.entries[key] = next
     writeData(user.id, data)
   },
+
+  async replaceData(user, data) {
+    writeData(user.id, data)
+  },
 }

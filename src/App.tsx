@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { backend } from './backend'
 import { currentBucket, friendlyDate, todayKey } from './lib/date'
 import { storageKey } from './lib/storage'
+import { BackupError, backupFilename, describeData, downloadText, parseBackup, serializeBackup } from './lib/backup'
 import { fetchContributions, planGithubSync, type Contributions } from './lib/github'
 import { dayProgress, getEntry, habitsOn, valueOn } from './lib/stats'
 import {
@@ -22,7 +23,7 @@ import { HabitDetail } from './components/HabitDetail'
 import { HabitForm } from './components/HabitForm'
 import { HabitRow } from './components/HabitRow'
 import { Progress } from './components/Progress'
-import { Archive, Bell, Chart, Exit, Folder, Logo, Moon, Plus, Sun, Today } from './components/icons'
+import { Archive, Bell, Chart, Download, Exit, Folder, Logo, Moon, Plus, Sun, Today, Upload } from './components/icons'
 
 type View = 'today' | 'progress' | 'archive'
 type Theme = 'light' | 'dark'
@@ -67,6 +68,8 @@ export default function App() {
   // Which row is being dragged, and which row it is currently hovering over.
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
+  // The hidden file picker behind "Import data".
+  const importInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -329,6 +332,35 @@ export default function App() {
     }
   }
 
+  function exportData() {
+    downloadText(backupFilename(), serializeBackup(data))
+    setToast({ message: `Exported ${describeData(data)}.` })
+  }
+
+  /**
+   * The file is read and checked in full before anything is replaced, so a
+   * wrong or damaged file leaves this device exactly as it was.
+   */
+  async function importData(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    // Clear the picker so choosing the same file again still fires a change.
+    event.target.value = ''
+    if (!file || !backend.replaceData) return
+    let incoming: AppData
+    try {
+      incoming = parseBackup(await file.text())
+    } catch (e) {
+      setToast({ message: e instanceof BackupError ? e.message : 'Could not read that file.' })
+      return
+    }
+    const message =
+      `Replace ${describeData(data)} on this device with ${describeData(incoming)} ` +
+      `from ${file.name}? This cannot be undone.`
+    if (!confirm(message)) return
+    await mutate((u) => backend.replaceData!(u, incoming))
+    setToast({ message: `Imported ${describeData(incoming)}.` })
+  }
+
   async function deleteHabit(habit: Habit) {
     if (!confirm(`Delete "${habit.name}" and all of its check-ins? This cannot be undone.`)) return
     setDetailId(null)
@@ -431,6 +463,24 @@ export default function App() {
             >
               {theme === 'dark' ? <Sun /> : <Moon />} {theme === 'dark' ? 'Light' : 'Dark'}
             </button>
+            <button className="nav-item" onClick={exportData}>
+              <Download /> Export data
+            </button>
+            {backend.replaceData && (
+              <>
+                <button className="nav-item" onClick={() => importInput.current?.click()}>
+                  <Upload /> Import data
+                </button>
+                <input
+                  ref={importInput}
+                  type="file"
+                  accept="application/json,.json"
+                  hidden
+                  aria-label="Choose a HabitNow backup to import"
+                  onChange={importData}
+                />
+              </>
+            )}
             <button className="nav-item" onClick={signOut}>
               <Exit /> Sign out
             </button>

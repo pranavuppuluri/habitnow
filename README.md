@@ -33,6 +33,9 @@ day, and watch each streak build. Free to host end to end.
 - **Phone layout**: a bottom bar with a More menu, sheets that rise from the
   bottom edge, charts that open on the newest weeks, and room left for the
   iPhone home bar.
+- **Export and import**: download everything as one JSON file in any mode. In
+  device mode, where a cleared browser loses it all, a backup can be restored
+  on another device; the file is checked in full before anything is replaced.
 
 ## How it fits together
 
@@ -176,7 +179,9 @@ The app picks its storage at build time. Nothing else changes.
 | Setup | None | Node 18+ and one systemd unit | About 10 minutes, free |
 
 Device mode is fully functional, but the account and its habits never leave the
-browser they were created in. Clearing site data erases them. Passwords are
+browser they were created in. Clearing site data erases them, so **Export data**
+in the sidebar writes a backup you can keep, and **Import data** restores one on
+any device, after a confirm that says what will replace what. Passwords are
 salted and hashed rather than stored in the clear, but anything in
 `localStorage` is readable by whoever has the device: treat it as a convenience
 lock, not security.

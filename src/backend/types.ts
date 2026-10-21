@@ -24,6 +24,13 @@ export interface Backend {
   deleteArea(user: User, id: string): Promise<void>
 
   setEntry(user: User, habitId: string, date: string, patch: EntryPatch): Promise<void>
+
+  /**
+   * Swaps everything this account holds for the contents of a backup. Only
+   * the device backend offers it: that is the mode that can lose data, and a
+   * restore there puts nothing at risk on any other device.
+   */
+  replaceData?(user: User, data: AppData): Promise<void>
 }
 
 export class AuthError extends Error {}

@@ -200,3 +200,78 @@ test('a GitHub habit fills itself in from the contribution graph', async () => {
   const graph = screen.getByRole('img', { name: '8 GitHub contributions in the last year' })
   expect(graph.querySelectorAll('rect').length).toBeGreaterThan(360)
 })
+
+test('export hands the browser a backup named by the date', async () => {
+  seed()
+  render(<App />)
+  await screen.findAllByText(/Drink water/)
+
+  let saved: { name: string; body: string } | null = null
+  vi.stubGlobal('URL', {
+    ...URL,
+    createObjectURL: (blob: Blob) => {
+      saved = { name: '', body: '' }
+      blob.text().then((t) => (saved!.body = t))
+      return 'blob:test'
+    },
+    revokeObjectURL: () => {},
+  })
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    saved!.name = this.download
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: /Export data/ }))
+
+  await waitFor(() => expect(saved?.body).toContain('"habitnow-backup"'))
+  expect(saved!.name).toBe(`habitnow-backup-${todayKey()}.json`)
+  expect(JSON.parse(saved!.body).data.habits).toHaveLength(2)
+  expect(screen.getByRole('status').textContent).toBe('Exported 2 habits, 1 area and 57 check-ins.')
+  click.mockRestore()
+})
+
+test('import asks before replacing, then swaps in the file', async () => {
+  seed()
+  render(<App />)
+  await screen.findAllByText(/Drink water/)
+
+  const backup = JSON.stringify({
+    format: 'habitnow-backup',
+    version: 1,
+    exportedAt: '2026-10-22T00:00:00.000Z',
+    data: {
+      habits: [{ id: 'x1', name: 'Stretch', icon: '🤸', days: EVERY_DAY, timeOfDay: 'morning' }],
+      areas: [],
+      entries: {},
+    },
+  })
+  const confirmed = vi.fn(() => true)
+  vi.stubGlobal('confirm', confirmed)
+
+  const input = screen.getByLabelText(/Choose a HabitNow backup/) as HTMLInputElement
+  fireEvent.change(input, { target: { files: [new File([backup], 'old-phone.json', { type: 'application/json' })] } })
+
+  await screen.findAllByText(/Stretch/)
+  expect(confirmed).toHaveBeenCalledWith(
+    'Replace 2 habits, 1 area and 57 check-ins on this device with 1 habit, 0 areas and 0 check-ins ' +
+      'from old-phone.json? This cannot be undone.',
+  )
+  expect(screen.queryByText('💧 Drink water')).toBeNull()
+  expect(JSON.parse(localStorage.getItem('habitnow.data.v1.test-user')!).habits[0].name).toBe('Stretch')
+})
+
+test('a file that is not a backup is refused and nothing changes', async () => {
+  seed()
+  render(<App />)
+  await screen.findAllByText(/Drink water/)
+  const confirmed = vi.fn(() => true)
+  vi.stubGlobal('confirm', confirmed)
+  const before = localStorage.getItem('habitnow.data.v1.test-user')
+
+  const input = screen.getByLabelText(/Choose a HabitNow backup/) as HTMLInputElement
+  fireEvent.change(input, { target: { files: [new File(['{"hello":1}'], 'notes.json')] } })
+
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('That file is not a HabitNow backup.'))
+  expect(confirmed).not.toHaveBeenCalled()
+  expect(localStorage.getItem('habitnow.data.v1.test-user')).toBe(before)
+  expect(screen.getByText('💧 Drink water')).toBeTruthy()
+})

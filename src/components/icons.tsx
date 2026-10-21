@@ -127,6 +127,18 @@ export const Bell = ({ size = 17 }: IconProps) => (
   </svg>
 )
 
+export const Download = ({ size = 17 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+  </svg>
+)
+
+export const Upload = ({ size = 17 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+  </svg>
+)
+
 export const Folder = ({ size = 17 }: IconProps) => (
   <svg {...base(size)}>
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
