@@ -286,6 +286,27 @@ JSON API, writes files atomically, and keeps a dated backup each day.
 `server/habitnow.service` runs it under systemd. A deploy swaps the `app/`
 folder and never touches `data/`.
 
+### HTTPS for phones
+
+A phone only installs the app, and only allows reminders, over HTTPS. Plain
+`http://<pi>:8080` works in a browser tab but can do neither. The kiosk on the
+Pi itself is fine either way, since `localhost` counts as secure.
+
+```bash
+scripts/pi-https.sh       # once: Tailscale Serve on https://<pi>.<tailnet>.ts.net
+scripts/pi-https.sh off   # undo
+```
+
+[Tailscale Serve](https://tailscale.com/kb/1312/serve) fetches a real
+certificate for the Pi's tailnet name and forwards to the server, so any phone
+running Tailscale gets a normal padlock and nothing is opened to the internet.
+Turn on **MagicDNS** and **HTTPS Certificates** once under DNS in the Tailscale
+admin console first. The server marks its session cookie `Secure` whenever the
+request came in over HTTPS.
+
+Without Tailscale, the server can serve TLS itself: set `TLS_CERT` and
+`TLS_KEY` to PEM files (see the commented lines in `server/habitnow.service`).
+
 ## Publish it on your own domain
 
 `npm run deploy:hostinger` builds and uploads `dist/` over FTPS to any host that

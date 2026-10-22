@@ -1,5 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { request } from 'node:https'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -118,8 +119,81 @@ describe('self-hosted server', () => {
     expect((await api('GET', 'data')).status).toBe(200)
   })
 
+  it('marks the session cookie Secure only when it arrived over HTTPS', async () => {
+    const signIn = (headers: Record<string, string>) =>
+      fetch(`${base}/api/signin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ email: 'me@home.net', password: 'secret1' }),
+      }).then((r) => r.headers.get('set-cookie') ?? '')
+
+    // Plain HTTP, like the kiosk on localhost: no Secure flag, or it would be dropped.
+    expect(await signIn({})).not.toMatch(/Secure/)
+    // Through Tailscale Serve, a proxy on the same machine that says it was HTTPS.
+    expect(await signIn({ 'X-Forwarded-Proto': 'https' })).toMatch(/; Secure$/)
+  })
+
   it('keeps a dated backup and refuses paths outside the app folder', async () => {
     expect(readdirSync(path.join(dataDir, 'backups'))).toHaveLength(1)
     expect((await fetch(`${base}/..%2f..%2fetc%2fpasswd`)).status).not.toBe(200)
+  })
+})
+
+let openssl = true
+try {
+  execFileSync('openssl', ['version'], { stdio: 'ignore' })
+} catch {
+  openssl = false
+}
+
+describe.skipIf(!openssl)('self-hosted server over TLS', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'habitnow-tls-'))
+  let tlsProc: ChildProcess
+  let port = ''
+
+  beforeAll(async () => {
+    execFileSync('openssl', [
+      'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
+      '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem'),
+    ], { stdio: 'ignore' })
+    tlsProc = spawn(process.execPath, [SERVER], {
+      env: {
+        ...process.env, PORT: '0', HOST: '127.0.0.1', DATA_DIR: dir, APP_DIR: dir,
+        TLS_CERT: path.join(dir, 'cert.pem'), TLS_KEY: path.join(dir, 'key.pem'),
+      },
+    })
+    port = await new Promise<string>((resolve) => {
+      tlsProc.stdout!.on('data', (chunk: Buffer) => {
+        const found = /https:\/\/[^:]+:(\d+)\s/.exec(chunk.toString())?.[1]
+        if (found) resolve(found)
+      })
+    })
+  })
+
+  afterAll(async () => {
+    await new Promise((resolve) => {
+      tlsProc.on('exit', resolve)
+      tlsProc.kill()
+    })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('serves HTTPS from TLS_CERT and TLS_KEY, with a Secure session cookie', async () => {
+    const res = await new Promise<{ status: number; cookie: string }>((resolve, reject) => {
+      const req = request(
+        {
+          host: '127.0.0.1', port, path: '/api/signup', method: 'POST', servername: 'localhost',
+          ca: readFileSync(path.join(dir, 'cert.pem')), headers: { 'Content-Type': 'application/json' },
+        },
+        (r) => {
+          r.resume()
+          resolve({ status: r.statusCode ?? 0, cookie: String(r.headers['set-cookie'] ?? '') })
+        },
+      )
+      req.on('error', reject)
+      req.end(JSON.stringify({ email: 'tls@home.net', password: 'secret1', name: 'T' }))
+    })
+    expect(res.status).toBe(200)
+    expect(res.cookie).toMatch(/; Secure/)
   })
 })
