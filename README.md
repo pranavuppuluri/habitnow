@@ -42,7 +42,8 @@ day, and watch each streak build. Free to host end to end.
 ### The pieces
 
 Every screen talks to one `Backend` interface. Which implementation sits behind
-it is decided once, at build time, so the UI never knows where data lives.
+it is decided once, at build time (see [The three modes](#the-three-modes)),
+so the UI never knows where data lives.
 
 ```mermaid
 flowchart LR
@@ -59,35 +60,6 @@ flowchart LR
   BE --> Server[("Self-hosted<br/>Node server + JSON files")]
   BE --> Cloud[("Cloud<br/>Supabase Postgres")]
   GH -. "username only" .-> API["github-contributions-api<br/>public contribution calendar"]
-```
-
-### Which backend a build gets
-
-```mermaid
-flowchart TD
-  Start(["npm run build"]) --> Q1{"VITE_BACKEND=server?<br/>npm run build:pi"}
-  Q1 -- yes --> S["Self-hosted mode<br/>accounts on your machine"]
-  Q1 -- no --> Q2{"Supabase keys<br/>in .env?"}
-  Q2 -- yes --> C["Cloud mode<br/>real accounts that sync"]
-  Q2 -- no --> D["Device mode<br/>accounts in this browser"]
-```
-
-### Checking a habit off
-
-```mermaid
-sequenceDiagram
-  actor You
-  participant Row as Habit row
-  participant App as App.tsx
-  participant BE as Backend
-  participant Stats as lib/stats.ts
-  You->>Row: tap the ring
-  Row->>App: set the value (one tap, or +1 for counted habits)
-  App->>BE: save the entry for that day
-  BE-->>App: fresh AppData
-  App->>Stats: streak, best run, rate, trend
-  Stats-->>App: numbers
-  App-->>You: ring fills, calendar and charts redraw
 ```
 
 ### Syncing a GitHub habit
