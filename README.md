@@ -120,6 +120,25 @@ flowchart LR
   Code -- "scripts/deploy-pi.sh" --> SSH["ssh + tar<br/>app swapped, data kept"] --> Pi["Raspberry Pi<br/>systemd service on :8080"] --> Kiosk["Full-screen kiosk"]
 ```
 
+### The live unhuman.in instance
+
+unhuman.in no longer serves HabitNow at its root. It is now a static launcher
+(`landing/`, deployed with `scripts/deploy-landing.mjs`) with two buttons,
+HabitNow and HealthNow. Both apps run on a private Linux box ("devpranav", a
+Debian LXC) reached over Tailscale and exposed to the public internet with
+Tailscale Funnel:
+
+- **HabitNow** is the self-hosted build (`npm run build:pi`) served by
+  `server/habitnow-server.mjs` at `https://devpranav.tailnet-6fba.ts.net/`, so
+  accounts, habits and entries live on that box's disk
+  (`/mnt/drive/habitnow-data`) instead of in each visitor's browser.
+- **HealthNow** is an Indian-food image classifier from the companion repo,
+  served at `https://devpranav.tailnet-6fba.ts.net:8443/`.
+
+A kill-switch service worker in `landing/` retires the old HabitNow PWA that
+unhuman.in used to install. GitHub Pages still serves the device-mode app as
+before.
+
 ## Colour, and why there are five
 
 The habit palette is five colours rather than the eight this started with,
